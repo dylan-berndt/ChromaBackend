@@ -28,5 +28,15 @@ def getItems(shopID):
     return jsonify(response.json()), response.status_code
 
 
+@app.route('/printify/item/<int:shopID>/<itemID>')
+def getItem(shopID, itemID):
+    url = f'https://api.printify.com/v1/shops/{shopID}/products/{itemID}.json'
+    headers = {
+        'Authorization': f'Bearer {token}'
+    }
+    response = requests.get(url, headers=headers)
+    return jsonify(response.json()), response.status_code
+
+
 if __name__ == '__main__':
     app.run(port=5000)

@@ -1,2 +1,2 @@
-# ShopProxy
-Proxy server designed with Flask for my online store.
+# ChromaBackend
+Backend of Chroma Crash store

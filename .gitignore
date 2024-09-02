@@ -162,5 +162,16 @@ cython_debug/
 #.idea/
 
 tokens.txt
+
 collectionOrganizer.py
-orders.txt
+hmm.py
+
+opened.txt
+captured.txt
+finalized.txt
+
+reviews.txt
+
+Contacts/
+
+.idea/

@@ -1,10 +1,10 @@
 from flask import Flask, jsonify, request
-import requests
 from flask_cors import CORS
 from flask_caching import Cache
-import uuid
-import base64
 import json
+import os
+from context import *
+
 
 app = Flask(__name__)
 CORS(app)
@@ -15,16 +15,30 @@ app.config['CACHE_DEFAULT_TIMEOUT'] = 240
 app.config['CACHE_KEY_PREFIX'] = 'chromashop_'
 cache.init_app(app)
 
-tokens = open('tokens.txt').read().split('\n')
 
-printifyToken = tokens[0]
-shopID = 16951213
-printifyURL = 'https://api.printify.com/v1'
+@app.route('/api/contact', methods=['POST'])
+def contact():
+    data = request.json
 
-paypalToken = ":".join(tokens[1:])
-paypalToken = base64.b64encode(paypalToken.encode()).decode()
-paypalURL = "https://api-m.sandbox.paypal.com"
-# paypalURL = "https://sandbox.paypal.com"
+    if data['name'] and data['email'] and data['subject'] and data['message']:
+        files = os.listdir('Contacts')
+
+        with open(f'Contacts/{len(files)}.txt', 'a+') as fo:
+            fo.write(json.dumps(data, indent=2))
+
+        return "", 201
+
+    return "", 400
+
+
+@app.route('/api/review', methods=['POST'])
+def review():
+    data = request.json
+
+    with openBlocking("reviews.txt", "a") as fo:
+        fo.write(", ".join(data.values) + "\n")
+
+    return "", 201
 
 
 @app.route('/api/shops', methods=['GET'])
@@ -49,7 +63,7 @@ def getItems():
 
 @app.route('/api/item/<itemID>', methods=['GET'])
 def getItem(itemID):
-    url = f'https://api.printify.com/v1/shops/{shopID}/products/{itemID}.json'
+    url = f'{printifyURL}/shops/{shopID}/products/{itemID}.json'
     headers = {
         'Authorization': f'Bearer {printifyToken}'
     }
@@ -78,7 +92,13 @@ def createOrder():
     }
     data = request.json
 
-    orderID = str(uuid.uuid4())
+    addressTo = data['address_to']
+    firstName = addressTo['first_name']
+    lastName = addressTo['last_name']
+
+    date = datetime.datetime.now().strftime('%m/%d/%Y %H:%M:%S')
+
+    orderID = firstName + " " + lastName + " " + date
 
     data["shipping_method"] = 1
     data["is_printify_express"] = False
@@ -109,9 +129,8 @@ def createOrder():
 
     response = createPaypalOrder(total)
 
-    if response.ok:
-        with open("orders.txt", "a") as fo:
-            fo.write(f'{response.json()["id"]}: {printifyOrderID}\n')
+    with openBlocking("opened.txt", "a") as fo:
+        fo.write(f'{response.json()["id"]}: {printifyOrderID}: {date}\n')
 
     return jsonify(response.json()), response.status_code
 
@@ -120,30 +139,62 @@ def createOrder():
 def processOrder(paypalOrderID):
     captureResponse = capturePaypalOrder(paypalOrderID)
 
+    printifyOrderID = ""
+    with openBlocking("opened.txt", "r") as fo:
+        for line in fo.readlines():
+            if line.startswith(paypalOrderID):
+                printifyOrderID = line.  split(":")[1][1:]
+
     if not captureResponse.ok:
+        cancelPrintifyOrder(printifyOrderID)
         return jsonify(captureResponse.json()), captureResponse.status_code
 
-    # printifyOrderID = ""
-    # with open("orders.txt", "r") as fo:
-    #     for line in fo.readlines():
-    #         if line.startswith(paypalOrderID):
-    #             printifyOrderID = line.split(":")[1][1:]
-    #
-    # if not printifyOrderID:
-    #     return "FUCK", 500
-    #
-    # url = f'{printifyURL}/shops/{shopID}/orders/{printifyOrderID}/send_to_production.json'
-    # headers = {
-    #     'Authorization': f'Bearer {printifyToken}'
-    # }
-    #
-    # response = requests.post(url, headers=headers)
-    #
-    # if not response.ok:
-    #     print(response.text)
-    #     return "", response.status_code
+    with openBlocking("captured.txt", "a") as fo:
+        fo.write(f'{printifyOrderID}\n')
+
+    # sendOrderToProduction(printifyOrderID)
 
     return jsonify(captureResponse.json()), captureResponse.status_code
+
+
+@app.route('/api/order/find/<paypalOrderID>', methods=['GET'])
+def findPrintifyOrderNumber(paypalOrderID):
+    printifyOrderID = ""
+    with openBlocking("opened.txt", "r") as fo:
+        for line in fo.readlines():
+            if line.startswith(paypalOrderID):
+                printifyOrderID = line.split(":")[1][1:]
+
+    if printifyOrderID == "":
+        return "", 400
+
+    data = {"id": printifyOrderID}
+
+    return jsonify(data), 200
+
+
+@app.route('/api/order/track/<printifyOrderID>', methods=['GET'])
+def trackOrder(printifyOrderID):
+    url = f'{printifyURL}/shops/{shopID}/orders/{printifyOrderID}.json'
+    headers = {
+        'Authorization': f'Bearer {printifyToken}',
+        'Content-Type': 'application/json'
+    }
+
+    response = requests.get(url, headers=headers)
+
+    return jsonify(response.json()), response.status_code
+
+
+def cancelPrintifyOrder(printifyOrderID):
+    url = f'{printifyURL}/shops/{shopID}/orders/{printifyOrderID}/cancel.json'
+    headers = {
+        'Authorization': f'Bearer {printifyToken}'
+    }
+
+    response = requests.post(url, headers=headers)
+
+    return jsonify(response.json()), response.status_code
 
 
 def generateAccessToken():
@@ -210,4 +261,6 @@ def capturePaypalOrder(orderID):
 
 
 if __name__ == '__main__':
+    cleanup()
+
     app.run(port=5000)

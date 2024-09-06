@@ -90,52 +90,6 @@ def calcShipping():
 def dummyOrder():
     response = createPaypalOrder(14.99)
 
-    print(json.dumps(response.json(), indent=2))
-
-    print(response.json()["id"])
-
-    # accessToken = generateAccessToken()
-    # url = f'{paypalURL}/v2/checkout/orders/{response.json()["id"]}'
-    # headers = {
-    #     'Authorization': f'Bearer {accessToken}',
-    #     'Content-Type': 'application/json'
-    # }
-    # body = {
-    #
-    # }
-    # r2 = requests.get(url, headers=headers, json=body)
-    # print(json.dumps(r2.json(), indent=2))
-
-    accessToken = generateAccessToken()
-    url = f'https://www.sandbox.paypal.com/v2/checkout/orders/{response.json()["id"]}/confirm-payment-source'
-    headers = {
-        'Authorization': f'Bearer {accessToken}',
-        'Content-Type': 'application/json'
-    }
-    body = {
-      "payment_source": {
-        "paypal": {
-          "name": {
-            "given_name": "John",
-            "surname": "Doe"
-          },
-          "email_address": "customer@example.com",
-          "experience_context": {
-            "payment_method_preference": "IMMEDIATE_PAYMENT_REQUIRED",
-            "brand_name": "EXAMPLE INC",
-            "locale": "en-US",
-            "landing_page": "LOGIN",
-            "shipping_preference": "SET_PROVIDED_ADDRESS",
-            "user_action": "PAY_NOW",
-            "return_url": "https://example.com/returnUrl",
-            "cancel_url": "https://example.com/cancelUrl"
-          }
-        }
-      }
-    }
-    r3 = requests.post(url, headers=headers, json=body)
-    print(json.dumps(r3.json(), indent=2))
-
     return jsonify(response.json()), response.status_code
 
 

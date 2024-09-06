@@ -134,7 +134,7 @@ def createOrder():
     totalPrice = 0
 
     for item in response.json()['line_items']:
-        amount = item['metadata']['price'] / 100
+        amount = item['quantity'] * item['metadata']['price'] / 100
         totalPrice += amount
 
     total = totalPrice + response.json()['total_shipping'] / 100

@@ -11,9 +11,11 @@ CORS(app)
 
 cache = Cache()
 app.config['CACHE_TYPE'] = 'simple'
-app.config['CACHE_DEFAULT_TIMEOUT'] = 240
+app.config['CACHE_DEFAULT_TIMEOUT'] = 600
 app.config['CACHE_KEY_PREFIX'] = 'chromashop_'
 cache.init_app(app)
+
+testMode = False
 
 
 @app.route('/api/contact', methods=['POST'])
@@ -52,6 +54,7 @@ def shop():
 
 
 @app.route('/api/items/', methods=['GET'])
+@cache.cached()
 def getItems():
     url = f'{printifyURL}/shops/{shopID}/products.json'
     headers = {
@@ -62,6 +65,7 @@ def getItems():
 
 
 @app.route('/api/item/<itemID>', methods=['GET'])
+@cache.cached()
 def getItem(itemID):
     url = f'{printifyURL}/shops/{shopID}/products/{itemID}.json'
     headers = {
@@ -83,8 +87,63 @@ def calcShipping():
     return jsonify(response.json()), response.status_code
 
 
+def dummyOrder():
+    response = createPaypalOrder(14.99)
+
+    print(json.dumps(response.json(), indent=2))
+
+    print(response.json()["id"])
+
+    # accessToken = generateAccessToken()
+    # url = f'{paypalURL}/v2/checkout/orders/{response.json()["id"]}'
+    # headers = {
+    #     'Authorization': f'Bearer {accessToken}',
+    #     'Content-Type': 'application/json'
+    # }
+    # body = {
+    #
+    # }
+    # r2 = requests.get(url, headers=headers, json=body)
+    # print(json.dumps(r2.json(), indent=2))
+
+    accessToken = generateAccessToken()
+    url = f'https://www.sandbox.paypal.com/v2/checkout/orders/{response.json()["id"]}/confirm-payment-source'
+    headers = {
+        'Authorization': f'Bearer {accessToken}',
+        'Content-Type': 'application/json'
+    }
+    body = {
+      "payment_source": {
+        "paypal": {
+          "name": {
+            "given_name": "John",
+            "surname": "Doe"
+          },
+          "email_address": "customer@example.com",
+          "experience_context": {
+            "payment_method_preference": "IMMEDIATE_PAYMENT_REQUIRED",
+            "brand_name": "EXAMPLE INC",
+            "locale": "en-US",
+            "landing_page": "LOGIN",
+            "shipping_preference": "SET_PROVIDED_ADDRESS",
+            "user_action": "PAY_NOW",
+            "return_url": "https://example.com/returnUrl",
+            "cancel_url": "https://example.com/cancelUrl"
+          }
+        }
+      }
+    }
+    r3 = requests.post(url, headers=headers, json=body)
+    print(json.dumps(r3.json(), indent=2))
+
+    return jsonify(response.json()), response.status_code
+
+
 @app.route('/api/order/create', methods=['POST'])
 def createOrder():
+    if testMode:
+        return dummyOrder()
+
     url = f'{printifyURL}/shops/{shopID}/orders.json'
     headers = {
         'Authorization': f'Bearer {printifyToken}',
@@ -95,6 +154,7 @@ def createOrder():
     addressTo = data['address_to']
     firstName = addressTo['first_name']
     lastName = addressTo['last_name']
+    email = addressTo['email']
 
     date = datetime.datetime.now().strftime('%m/%d/%Y %H:%M:%S')
 
@@ -130,20 +190,34 @@ def createOrder():
     response = createPaypalOrder(total)
 
     with openBlocking("opened.txt", "a") as fo:
-        fo.write(f'{response.json()["id"]}: {printifyOrderID}: {date}\n')
+        fo.write(f'{response.json()["id"]}: {printifyOrderID}: {date}: {email}\n')
 
     return jsonify(response.json()), response.status_code
 
 
+def dummyProcess(paypalOrderID):
+    captureResponse = capturePaypalOrder(paypalOrderID)
+
+    emailTemplate = open("orderEmailTemplate.html", "r").read().replace('ORDERNUMBER', '66d648c6e5e6a403d40c2da7')
+    sendEmail("Track your Chroma Crash Order", emailTemplate, "orders", "technowaffles46@gmail.com")
+
+    return jsonify(captureResponse.json()), captureResponse.status_code
+
+
 @app.route('/api/order/process/<paypalOrderID>', methods=['POST'])
 def processOrder(paypalOrderID):
+    if testMode:
+        return dummyProcess(paypalOrderID)
+
     captureResponse = capturePaypalOrder(paypalOrderID)
 
     printifyOrderID = ""
+    email = ""
     with openBlocking("opened.txt", "r") as fo:
         for line in fo.readlines():
             if line.startswith(paypalOrderID):
-                printifyOrderID = line.  split(":")[1][1:]
+                printifyOrderID = line.split(":")[1][1:]
+                email = line.split(": ")[3]
 
     if not captureResponse.ok:
         cancelPrintifyOrder(printifyOrderID)
@@ -152,13 +226,20 @@ def processOrder(paypalOrderID):
     with openBlocking("captured.txt", "a") as fo:
         fo.write(f'{printifyOrderID}\n')
 
+    emailTemplate = open("orderEmailTemplate.html", "r").read().replace('ORDERNUMBER', printifyOrderID)
+    sendEmail("Track your Chroma Crash Order", emailTemplate, "orders", email)
+
     # sendOrderToProduction(printifyOrderID)
 
     return jsonify(captureResponse.json()), captureResponse.status_code
 
 
 @app.route('/api/order/find/<paypalOrderID>', methods=['GET'])
+@cache.cached()
 def findPrintifyOrderNumber(paypalOrderID):
+    if testMode:
+        return jsonify({"id": "66d648c6e5e6a403d40c2da7"}), 200
+
     printifyOrderID = ""
     with openBlocking("opened.txt", "r") as fo:
         for line in fo.readlines():
@@ -174,6 +255,7 @@ def findPrintifyOrderNumber(paypalOrderID):
 
 
 @app.route('/api/order/track/<printifyOrderID>', methods=['GET'])
+@cache.cached()
 def trackOrder(printifyOrderID):
     url = f'{printifyURL}/shops/{shopID}/orders/{printifyOrderID}.json'
     headers = {

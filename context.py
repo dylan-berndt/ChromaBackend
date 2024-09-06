@@ -3,6 +3,12 @@ import requests
 import base64
 import datetime
 from contextlib import contextmanager
+import smtplib
+import ssl
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.header import Header
+from email.utils import formataddr
 
 tokens = open('tokens.txt').read().split('\n')
 
@@ -10,10 +16,12 @@ printifyToken = tokens[0]
 shopID = 16951213
 printifyURL = 'https://api.printify.com/v1'
 
-paypalToken = ":".join(tokens[1:])
+paypalToken = ":".join(tokens[1:3])
 paypalToken = base64.b64encode(paypalToken.encode()).decode()
 paypalURL = "https://api-m.sandbox.paypal.com"
 # paypalURL = "https://sandbox.paypal.com"
+
+gmailTokens = tokens[3:5]
 
 locks = {
     "opened.txt": threading.Lock(),
@@ -35,6 +43,20 @@ def openBlocking(fileName, fileMode):
         file.close()
         if fileName in locks:
             locks[fileName].release()
+
+
+def sendEmail(subject, body, name, recipient):
+    msg = MIMEMultipart('alternative')
+    msg['Subject'] = subject
+    msg['From'] = formataddr((str(Header("Chroma Crash", 'utf-8')), f'{name}@chromacrash.com'))
+    msg['To'] = recipient
+    msg.attach(MIMEText(body, 'html'))
+
+    context = ssl.create_default_context()
+
+    with smtplib.SMTP_SSL('smtp.gmail.com', 465, context=context) as smtp_server:
+        smtp_server.login(gmailTokens[0], gmailTokens[1])
+        smtp_server.send_message(msg)
 
 
 def sendOrderToProduction(printifyOrderID):
